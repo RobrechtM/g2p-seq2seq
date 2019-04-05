@@ -320,12 +320,13 @@ class G2PModel(object):
         [correct, errors] = self.__run_op(sess, decode_op, self.test_path)
 
     else:
-      correct, errors = self.calc_errors(self.test_path)
+      correct, errors, per = self.calc_errors(self.test_path)
 
     print("Words: %d" % (correct+errors))
     print("Errors: %d" % errors)
     print("WER: %.3f" % (float(errors)/(correct+errors)))
     print("Accuracy: %.3f" % float(1.-(float(errors)/(correct+errors))))
+    print("PER: %.3f" % per)
 
   def freeze(self):
     """Freeze pre-trained model."""
@@ -342,32 +343,32 @@ class G2PModel(object):
     # part it can dump
     # NOTE: this variable is plural, because you can have multiple output nodes
     output_node_names = ["transformer/parallel_0_5/transformer/body/decoder/"
-        "layer_0/self_attention/multihead_attention/dot_product_attention/"
-        "Softmax",
+                         "layer_0/self_attention/multihead_attention/dot_product_attention/"
+                         "Softmax",
                          "transformer/parallel_0_5/transformer/body/encoder/"
-        "layer_0/self_attention/multihead_attention/dot_product_attention/"
-        "Softmax",
+                         "layer_0/self_attention/multihead_attention/dot_product_attention/"
+                         "Softmax",
                          "transformer/parallel_0_5/transformer/body/encoder/"
-        "layer_1/self_attention/multihead_attention/dot_product_attention/"
-        "Softmax",
+                         "layer_1/self_attention/multihead_attention/dot_product_attention/"
+                         "Softmax",
                          "transformer/parallel_0_5/transformer/body/encoder/"
-        "layer_2/self_attention/multihead_attention/dot_product_attention/"
-        "Softmax",
+                         "layer_2/self_attention/multihead_attention/dot_product_attention/"
+                         "Softmax",
                          "transformer/parallel_0_5/transformer/body/decoder/"
-        "layer_0/encdec_attention/multihead_attention/dot_product_attention/"
-        "Softmax",
+                         "layer_0/encdec_attention/multihead_attention/dot_product_attention/"
+                         "Softmax",
                          "transformer/parallel_0_5/transformer/body/decoder/"
-        "layer_1/self_attention/multihead_attention/dot_product_attention/"
-        "Softmax",
+                         "layer_1/self_attention/multihead_attention/dot_product_attention/"
+                         "Softmax",
                          "transformer/parallel_0_5/transformer/body/decoder/"
-        "layer_1/encdec_attention/multihead_attention/dot_product_attention/"
-        "Softmax",
+                         "layer_1/encdec_attention/multihead_attention/dot_product_attention/"
+                         "Softmax",
                          "transformer/parallel_0_5/transformer/body/decoder/"
-        "layer_2/self_attention/multihead_attention/dot_product_attention/"
-        "Softmax",
+                         "layer_2/self_attention/multihead_attention/dot_product_attention/"
+                         "Softmax",
                          "transformer/parallel_0_5/transformer/body/decoder/"
-        "layer_2/encdec_attention/multihead_attention/dot_product_attention/"
-        "Softmax"]
+                         "layer_2/encdec_attention/multihead_attention/dot_product_attention/"
+                         "Softmax"]
 
     # We clear devices to allow TensorFlow to control on which device it will
     # load operations
@@ -477,12 +478,40 @@ class G2PModel(object):
 
     return [inputs, decodes]
 
+  def levenshtein(s, t):
+    """Return edit distance between source array `s` and target
+    array `t`  
+    """
+    if s == t:
+        return 0
+    elif len(s) == 0:
+        return len(t)
+    elif len(t) == 0:
+        return len(s)
+
+    v0 = np.arange(len(t) + 1)
+    v1 = np.empty(len(t) + 1)
+
+    for i in range(len(s)):
+        v1[0] = i + 1
+        for j in range(len(t)):
+            v1[j + 1] = min(v1[j] + 1,    # deletion
+                            v0[j + 1] + 1,   # insertion
+                            v0[j] + (0 if s[i] == t[j] else 1))  # substitution / nothing
+        v0 = np.copy(v1)
+
+  return v1[-1]
+
   def calc_errors(self, decode_file_path):
     """Calculate a number of prediction errors."""
     inputs, decodes = self.__decode_from_file(decode_file_path)
 
-    correct, errors = 0, 0
+    correct, errors, dist, total_dist = 0, 0, 0, 0
     for index, word in enumerate(inputs):
+      total_dist += len(decodes[index].split(' '))
+      dist += min([self._levenshtein(option.split(' '), decodes[index].split(' '))
+                      for option in self.g2p_gt_map[word]])
+
       if self.decode_hp.return_beams:
         beam_correct_found = False
         for beam_decode in decodes[index]:
@@ -498,8 +527,8 @@ class G2PModel(object):
           correct += 1
         else:
           errors += 1
-
-    return correct, errors
+    per = dist / total_dist
+    return correct, errors, per
 
 
 def get_word():
